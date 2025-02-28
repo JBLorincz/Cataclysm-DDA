@@ -126,6 +126,7 @@ int player::hit_roll()
 // Melee calculation is two parts. In melee_attack, we calculate if we would
 // hit. In Creature::deal_melee_hit, we calculate if the target dodges.
 void player::melee_attack(Creature &t, bool allow_special) {
+    int move_type = 0;
     bool is_u = (this == &(g->u)); // Affects how we'll display messages
     if (!t.is_player()) {
         t.add_effect("hit_by_player", 100); // Flag as attacked by us for AI
@@ -141,6 +142,31 @@ void player::melee_attack(Creature &t, bool allow_special) {
     int stab_dam = roll_stab_damage(false);
 
     bool critical_hit = scored_crit(t.dodge_roll());
+
+    move_type = query_int("0 power 1 light 2 nuke");
+
+    switch ( move_type )
+      {
+      case 0:
+	g->add_msg(_("You swing powerfully!"));
+	bash_dam *= 1.5;
+	move_cost *= 1.5;
+	break;
+      case 1:
+	g->add_msg(_("You swing quickly!"));
+	move_cost *= 0.5;
+	bash_dam *= 0.75;
+	break;
+      case 2:
+	g->add_msg(_("You give 'em all you got and..."));
+	bash_dam *= 3000;
+	break;
+      default: break;
+      }
+
+  
+      
+
 
     // multiply damage by style damage_mults
     bash_dam *= mabuff_bash_mult();

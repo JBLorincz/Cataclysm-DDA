@@ -40,10 +40,10 @@
 RELEASE_FLAGS = -Werror -Wno-switch -Wno-sign-compare -Wno-missing-braces -Wno-narrowing
 WARNINGS = -Wall -Wextra
 # Uncomment below to disable warnings
-#WARNINGS = -w
+WARNINGS = -w
 DEBUG = -g
 #PROFILE = -pg
-#OTHERS = -O3
+OTHERS = --std=c++98
 #DEFINES = -DNDEBUG
 
 # Disable debug. Comment this out to get logging.
