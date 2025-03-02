@@ -6,17 +6,18 @@
 #include "martialarts.h"
 #include <sstream>
 #include <stdlib.h>
+#include <panel.h>
 #include <algorithm>
 
 #include "cursesdef.h"
 
 void player_hit_message(player* attacker, std::string message,
-                        std::string target_name, int dam, bool crit);
+                        std::string target_name, int dam, bool crit, int bodypart);
 void melee_practice(const calendar& turn, player &u, bool hit, bool unarmed,
                     bool bashing, bool cutting, bool stabbing);
 int  attack_speed(player &u);
 int  stumble(player &u);
-std::string melee_message(matec_id tech, player &p, int bash_dam, int cut_dam, int stab_dam);
+std::string melee_message(matec_id tech, player &p, int bash_dam, int cut_dam, int stab_dam, int body_part);
 
 /* Melee Functions!
  * These all belong to class player.
@@ -126,7 +127,7 @@ int player::hit_roll()
 // Melee calculation is two parts. In melee_attack, we calculate if we would
 // hit. In Creature::deal_melee_hit, we calculate if the target dodges.
 void player::melee_attack(Creature &t, bool allow_special) {
-    int move_type = 0;
+
     bool is_u = (this == &(g->u)); // Affects how we'll display messages
     if (!t.is_player()) {
         t.add_effect("hit_by_player", 100); // Flag as attacked by us for AI
@@ -135,7 +136,7 @@ void player::melee_attack(Creature &t, bool allow_special) {
     std::string message = is_u ? _("You hit %s") : _("<npcname> hits %s");
     std::string target_name = t.disp_name();
 
-    int move_cost = attack_speed(*this);
+    double move_cost = attack_speed(*this);
 
     int bash_dam = roll_bash_damage(false);
     int cut_dam  = roll_cut_damage(false);
@@ -143,32 +144,62 @@ void player::melee_attack(Creature &t, bool allow_special) {
 
     bool critical_hit = scored_crit(t.dodge_roll());
 
-    move_type = query_int("0 power 1 light 2 nuke");
+    int body_part = 0;
+    int move_type = 0;
+    int move_accuracy_malus = 0;
 
+
+    // in the future, creature objects will contain body parts and we will iterate through them.
+    body_part = query_int("Aim at body part: 0 head 1 torso");
+    // perhaps martial arts can add extra moves
+    move_type = query_int("Technique: 0 power 1 light 2 wild 3 precise 4 shove");
+
+
+    // Values are multiplied by these modifiers.
+    double stumble_modifier = 1;
+    double accuracy_modifier = 1;
+
+    // TODO affect all damage types not just bash. 
+    
     switch ( move_type )
       {
       case 0:
-	g->add_msg(_("You swing powerfully!"));
-	bash_dam *= 1.5;
-	move_cost *= 1.5;
+	g->add_msg(_("You swing powerfully and..."));
+	bash_dam *= 1.4;
+	move_cost *= 1.1;
+	stumble_modifier = 1.2;
 	break;
       case 1:
-	g->add_msg(_("You swing quickly!"));
-	move_cost *= 0.5;
-	bash_dam *= 0.75;
+	g->add_msg(_("You swing quickly and..."));
+	move_cost *= 0.8;
+	bash_dam *= 0.9;
+	stumble_modifier = 0.7;
 	break;
       case 2:
-	g->add_msg(_("You give 'em all you got and..."));
-	bash_dam *= 3000;
+	g->add_msg(_("You swing wildly and..."));
+	bash_dam *= 1.25;
+	move_cost *= 0.8;
+	stumble_modifier = 2;
+	accuracy_modifier = 0.7;
 	break;
-      default: break;
+      case 3:
+	g->add_msg(_("You aim carefully and..."));
+	move_cost *= 1.2;
+	accuracy_modifier = 1.5;
+	break;
+      case 4:
+	g->add_msg(string_format("You shove %s to the ground!", target_name.c_str()).c_str());
+	move_cost = 40;
+	mod_moves(-move_cost);
+	t.add_effect("downed", 40 + (g->u).str_cur * 2);
+	return;
+	break;
+      default:
+	break;
       }
 
-  
-      
+    if ( body_part == 0 ) { accuracy_modifier *= 0.33; bash_dam *= 2; };
 
-
-    // multiply damage by style damage_mults
     bash_dam *= mabuff_bash_mult();
     cut_dam *= mabuff_cut_mult();
     stab_dam *= mabuff_cut_mult();
@@ -200,9 +231,9 @@ void player::melee_attack(Creature &t, bool allow_special) {
     // Handles speed penalties to monster & us, etc
     std::string specialmsg = melee_special_effects(t, d);
     dealt_damage_instance dealt_dam; // gets overwritten with the dealt damage values
-    int hit_spread = t.deal_melee_attack(this, hit_roll(), critical_hit, d, dealt_dam);
+    int hit_spread = t.deal_melee_attack(this, hit_roll() * accuracy_modifier, critical_hit, d, dealt_dam);
     if (hit_spread < 0) {
-        int stumble_pen = stumble(*this);
+        int stumble_pen = stumble(*this) * stumble_modifier ;
         if (is_player()) { // Only display messages if this is the player
             if (has_miss_recovery_tec())
                 g->add_msg(_("You feint."));
@@ -239,12 +270,18 @@ void player::melee_attack(Creature &t, bool allow_special) {
         if (dam >= 5 && has_artifact_with(AEP_SAP_LIFE))
             healall( rng(dam / 10, dam / 5) );
 
-        message = melee_message(technique.id, *this, bash_dam, cut_dam, stab_dam);
-        player_hit_message(this, message, target_name, dam, critical_hit);
+        message = melee_message(technique.id, *this, bash_dam, cut_dam, stab_dam, body_part);
+        player_hit_message(this, message, target_name, dam, critical_hit, body_part);
 
         if (!specialmsg.empty())
             g->add_msg_if_player(this,specialmsg.c_str());
     }
+
+    if ( body_part == 0 && dealt_dam.total_damage() >= 15 )
+      {
+	g->add_msg(string_format("%s is concussed!", target_name.c_str()).c_str());
+	t.add_effect("stunned", 5 + dealt_dam.total_damage() + (g->u).str_cur);
+      }
 
     mod_moves(-move_cost);
 
@@ -1409,7 +1446,7 @@ std::vector<special_attack> player::mutation_attacks(Creature &t)
     return ret;
 }
 
-std::string melee_message(matec_id tec_id, player &p, int bash_dam, int cut_dam, int stab_dam)
+std::string melee_message(matec_id tec_id, player &p, int bash_dam, int cut_dam, int stab_dam, int bodypart)
 {
     if (ma_techniques.find(tec_id) != ma_techniques.end()) {
         if (ma_techniques[tec_id].messages.size() < 2) {
@@ -1493,8 +1530,11 @@ std::string melee_message(matec_id tec_id, player &p, int bash_dam, int cut_dam,
 
 // display the hit message for an attack
 void player_hit_message(player* attacker, std::string message,
-                        std::string target_name, int dam, bool crit)
+                        std::string target_name, int dam, bool crit, int bodypart)
 {
+    std::string bodypart_message = "the bug";
+    if ( bodypart == 0 ) { bodypart_message = _("head"); };
+    if ( bodypart == 1 ) { bodypart_message = _("torso"); };
     std::string msg;
     if (dam <= 0) {
         if (attacker->is_npc()) {
@@ -1510,7 +1550,7 @@ void player_hit_message(player* attacker, std::string message,
                             message.c_str(), dam);
     } else {
         //~ someone hits something for %d damage
-        msg = string_format(_("%s for %d damage."), message.c_str(), dam);
+      msg = string_format(_("%s in the %s for %d damage."), message.c_str(), bodypart_message.c_str(), dam);
     }
 
     // same message is used for player and npc,
